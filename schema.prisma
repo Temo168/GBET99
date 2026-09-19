@@ -1,0 +1,204 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  SELF_EXCLUDED
+  CLOSED
+}
+
+enum KycStatus {
+  NOT_STARTED
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REVERSED
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  WAGER
+  WIN
+  REFUND
+  BONUS
+  ADJUSTMENT
+}
+
+enum GameRoundStatus {
+  OPEN
+  SETTLED
+  CANCELLED
+}
+
+enum LedgerAccountType {
+  ASSET
+  LIABILITY
+  REVENUE
+  EXPENSE
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String
+  status       UserStatus  @default(PENDING)
+  firstName    String?
+  lastName     String?
+  dateOfBirth  DateTime?
+  country      String?
+  kycStatus    KycStatus   @default(NOT_STARTED)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  wallet        Wallet?
+  sessions      Session[]
+  transactions  Transaction[]
+  gameRounds    GameRound[]
+  selfExclusion SelfExclusion?
+  deposits      Deposit[]
+  withdrawals   Withdrawal[]
+}
+
+model Session {
+  id         String   @id @default(uuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model Wallet {
+  id        String @id @default(uuid())
+  userId    String @unique
+  currency  String
+  createdAt DateTime @default(now())
+  user      User @relation(fields: [userId], references: [id])
+  accounts  LedgerAccount[]
+}
+
+model LedgerAccount {
+  id       String            @id @default(uuid())
+  walletId String?
+  code     String
+  type     LedgerAccountType
+  currency String
+  wallet   Wallet?           @relation(fields: [walletId], references: [id])
+  entries  LedgerEntry[]
+  @@unique([code, currency])
+}
+
+model LedgerEntry {
+  id            String   @id @default(uuid())
+  transactionId String
+  accountId     String
+  amountMinor   BigInt
+  createdAt     DateTime @default(now())
+  transaction   Transaction   @relation(fields: [transactionId], references: [id])
+  account       LedgerAccount @relation(fields: [accountId], references: [id])
+  @@index([accountId, createdAt])
+}
+
+model Transaction {
+  id             String            @id @default(uuid())
+  userId         String?
+  idempotencyKey String            @unique
+  type           TransactionType
+  status         TransactionStatus
+  currency       String
+  amountMinor    BigInt
+  reference      String?
+  metadata       Json?
+  createdAt      DateTime          @default(now())
+  user           User?             @relation(fields: [userId], references: [id])
+  entries        LedgerEntry[]
+  @@index([userId, createdAt])
+}
+
+model Game {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  name      String
+  enabled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  rounds    GameRound[]
+}
+
+model GameRound {
+  id          String           @id @default(uuid())
+  gameId      String
+  userId      String
+  wagerMinor  BigInt
+  payoutMinor BigInt           @default(0)
+  currency    String
+  status      GameRoundStatus
+  outcome     Json?
+  createdAt   DateTime         @default(now())
+  settledAt   DateTime?
+  game        Game             @relation(fields: [gameId], references: [id])
+  user        User             @relation(fields: [userId], references: [id])
+  @@index([userId, createdAt])
+}
+
+model Deposit {
+  id           String            @id @default(uuid())
+  userId       String
+  amountMinor  BigInt
+  currency     String
+  provider     String
+  providerRef  String?
+  status       TransactionStatus
+  createdAt    DateTime          @default(now())
+  user         User              @relation(fields: [userId], references: [id])
+}
+
+model Withdrawal {
+  id           String            @id @default(uuid())
+  userId       String
+  amountMinor  BigInt
+  currency     String
+  status       TransactionStatus
+  reviewedBy   String?
+  reviewReason String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  user         User              @relation(fields: [userId], references: [id])
+}
+
+model SelfExclusion {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  startsAt   DateTime
+  endsAt     DateTime?
+  permanent  Boolean  @default(false)
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?
+  action      String
+  targetType  String
+  targetId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  @@index([targetType, targetId])
+}
